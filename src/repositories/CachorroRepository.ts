@@ -1,77 +1,103 @@
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Cachorro } from '../types/Cachorro';
+import type { Avistamento, Cachorro, StatusCachorro } from '../types/Cachorro';
 
-const CHAVE_ARMAZENAMENTO = '@AchouPet:cachorros';
+const CHAVE = '@AchouPet:cachorros';
 
-export class CachorroRepository {
+class CachorroRepository {
   async listar(): Promise<Cachorro[]> {
-    try {
-      const dados = await AsyncStorage.getItem(
-        CHAVE_ARMAZENAMENTO
-      );
+    const dados = await AsyncStorage.getItem(CHAVE);
 
-      if (!dados) {
-        return [];
-      }
+    if (!dados) return [];
 
-      return JSON.parse(dados) as Cachorro[];
-    } catch {
-      throw new Error(
-        'Não foi possível carregar os cachorros salvos.'
-      );
-    }
+    const registros = JSON.parse(dados) as Cachorro[];
+
+    return registros.map((cachorro) => ({
+      ...cachorro,
+      favorito: cachorro.favorito ?? false,
+      status: cachorro.status ?? 'PROCURANDO',
+      avistamentos: cachorro.avistamentos ?? [],
+      local: cachorro.local ?? '',
+    }));
   }
 
-  async adicionar(cachorro: Cachorro): Promise<Cachorro> {
-    if (!cachorro.descricao.trim()) {
-      throw new Error('Escreva uma descrição do cachorro.');
-    }
+  async adicionar(cachorro: Cachorro): Promise<void> {
+    const cachorros = await this.listar();
 
-    if (
-      !cachorro.fotoUri &&
-      (cachorro.latitude === null ||
-        cachorro.longitude === null)
-    ) {
-      throw new Error(
-        'Registre uma foto ou obtenha a localização do cachorro.'
-      );
-    }
+    cachorros.unshift({
+      ...cachorro,
+      favorito: cachorro.favorito ?? false,
+      status: cachorro.status ?? 'PROCURANDO',
+      avistamentos: cachorro.avistamentos ?? [],
+    });
 
-    try {
-      const cachorros = await this.listar();
-
-      cachorros.push(cachorro);
-
-      await AsyncStorage.setItem(
-        CHAVE_ARMAZENAMENTO,
-        JSON.stringify(cachorros)
-      );
-
-      return cachorro;
-    } catch {
-      throw new Error(
-        'Não foi possível salvar o cadastro no celular.'
-      );
-    }
+    await this.salvar(cachorros);
   }
 
   async excluir(id: string): Promise<void> {
-    try {
-      const cachorros = await this.listar();
+    const cachorros = await this.listar();
+    await this.salvar(cachorros.filter((item) => item.id !== id));
+  }
 
-      const atualizados = cachorros.filter(
-        (cachorro) => cachorro.id !== id
-      );
+  async atualizarFavorito(id: string, favorito: boolean): Promise<void> {
+    const cachorros = await this.listar();
 
-      await AsyncStorage.setItem(
-        CHAVE_ARMAZENAMENTO,
-        JSON.stringify(atualizados)
-      );
-    } catch {
-      throw new Error(
-        'Não foi possível excluir o registro.'
-      );
+    await this.salvar(
+      cachorros.map((item) =>
+        item.id === id ? { ...item, favorito } : item
+      )
+    );
+  }
+
+  async atualizarStatus(
+    id: string,
+    status: StatusCachorro
+  ): Promise<void> {
+    const cachorros = await this.listar();
+
+    await this.salvar(
+      cachorros.map((item) =>
+        item.id === id ? { ...item, status } : item
+      )
+    );
+  }
+
+  async adicionarAvistamento(
+    id: string,
+    avistamento: Avistamento
+  ): Promise<void> {
+    if (!avistamento.local.trim()) {
+      throw new Error('Informe o local do novo avistamento.');
     }
+
+    const cachorros = await this.listar();
+    const indice = cachorros.findIndex((item) => item.id === id);
+
+    if (indice === -1) {
+      throw new Error('Cachorro não encontrado.');
+    }
+
+    const cachorro = cachorros[indice];
+
+    cachorros[indice] = {
+      ...cachorro,
+      local: avistamento.local,
+      latitude: avistamento.latitude,
+      longitude: avistamento.longitude,
+      fotoUri: avistamento.fotoUri ?? cachorro.fotoUri,
+      dataHora: avistamento.dataHora,
+      status: 'PROCURANDO',
+      avistamentos: [
+        ...(cachorro.avistamentos ?? []),
+        avistamento,
+      ],
+    };
+
+    await this.salvar(cachorros);
+  }
+
+  private async salvar(cachorros: Cachorro[]): Promise<void> {
+    await AsyncStorage.setItem(CHAVE, JSON.stringify(cachorros));
   }
 }
 
